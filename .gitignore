@@ -1,6 +1,13 @@
 # Dependencies
 node_modules/
 
+# Python
+**/.venv/
+**/venv/
+**/__pycache__/
+*.pyc
+*.pyo
+
 # Environment / secrets — NEVER commit these
 .env
 .env.local
