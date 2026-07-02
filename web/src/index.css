@@ -659,11 +659,11 @@ code {
 
 .attach { padding: 7px 12px; font-size: 0.85rem; }
 
+.file-chip-row { display: flex; }
 .file-chip {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  align-self: flex-start;
   background: var(--accent-soft);
   border: 1px solid #3a2f57;
   border-radius: 8px;
@@ -682,6 +682,108 @@ code {
 }
 .repo-file summary { cursor: pointer; user-select: none; }
 .repo-file summary code { color: var(--accent); }
+
+/* ---------- responsive ---------- */
+
+/* mobile-safe viewport heights (address bars eat 100vh on phones) */
+.layout, .sidebar { height: 100dvh; }
+.intro { height: 100dvh; }
+
+/* hamburger — hidden on desktop */
+.menu-btn {
+  display: none;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 45;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 5, 8, 0.55);
+  z-index: 39;
+  animation: fade-in 0.2s ease both;
+}
+
+/* let the input controls wrap instead of overflowing */
+.chat-input-row { flex-wrap: wrap; }
+
+/* auth modal shrinks before it would overflow (desktop keeps 900x600) */
+@media (max-width: 960px) {
+  .modal {
+    width: min(94vw, 900px);
+    height: min(90dvh, 600px);
+  }
+  .modal-left img { width: clamp(120px, 22vw, 240px); }
+}
+
+/* --- tablets & small laptops --- */
+@media (max-width: 900px) {
+  .menu-btn { display: block; }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 40;
+    width: 272px;
+    transform: translateX(-105%);
+    transition: transform 0.25s ease;
+    box-shadow: none;
+  }
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: 24px 0 60px rgba(0, 0, 0, 0.45);
+  }
+
+  .main { width: 100%; }
+  .chat-log { padding-top: 60px; } /* clear the hamburger */
+}
+
+/* --- phones --- */
+@media (max-width: 640px) {
+  .chat-log { padding-left: 2px; padding-right: 2px; }
+  .bubble { max-width: 92%; padding: 10px 12px; }
+  .chat .avatar { width: 38px; height: 38px; }
+  .chat .avatar img { width: 34px; }
+  .chat-input { padding-bottom: 12px; }
+  .chat-input-box button { padding: 10px 16px; }
+  pre { font-size: 0.8rem; padding: 10px; }
+
+  /* auth modal: stack logo above the form, fit the screen */
+  .modal {
+    width: min(94vw, 420px);
+    height: auto;
+    max-height: 92dvh;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .modal-left {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 26px;
+  }
+  .modal-left img { width: 110px; }
+  .modal-right { padding: 26px 24px 30px; }
+
+  /* intro: scale the ghost + title down */
+  .intro-ghost > img:not(.ghost-eyes) { width: min(230px, 52vw); }
+  .intro-title { font-size: clamp(2rem, 9vw, 3.6rem); }
+  .intro-ping { width: min(230px, 52vw); height: auto; aspect-ratio: 1; }
+}
+
+/* --- very small phones --- */
+@media (max-width: 380px) {
+  .mode-toggle button { padding: 5px 8px; font-size: 0.8rem; }
+  .attach { padding: 6px 8px; }
+}
 
 /* ---------- auth modal ---------- */
 .modal-backdrop {

@@ -65,6 +65,7 @@ export default function Analyze({ onLogout }) {
   const [history, setHistory] = useState([]);
   const [activeJobId, setActiveJobId] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile drawer
   const idRef = useRef(0);
   const pollRef = useRef(null);
   const logEndRef = useRef(null);
@@ -176,6 +177,7 @@ export default function Analyze({ onLogout }) {
     if (busy) return;
     clearInterval(pollRef.current);
     setActiveJobId(jobId);
+    setSidebarOpen(false);
     try {
       const { job, result } = await getJob(jobId);
       const uid = ++idRef.current;
@@ -196,6 +198,7 @@ export default function Analyze({ onLogout }) {
     setMessages([]);
     setActiveJobId(null);
     setBusy(false);
+    setSidebarOpen(false);
   }
 
   // Stop watching the running analysis. (The backend job still finishes and
@@ -213,7 +216,17 @@ export default function Analyze({ onLogout }) {
 
   return (
     <div className="layout">
-      <aside className="sidebar">
+      <button
+        type="button"
+        className="menu-btn"
+        aria-label="Menu"
+        onClick={() => setSidebarOpen((o) => !o)}
+      >
+        ☰
+      </button>
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+
+      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-brand"><Logo size={26} /> BugStalker</div>
         <button className="new-chat" onClick={newChat}>＋ New analysis</button>
         <div className="history">
@@ -275,9 +288,11 @@ export default function Analyze({ onLogout }) {
           </div>
 
           {fileName && (
-            <div className="file-chip">
-              📎 {fileName}
-              <button type="button" className="ghost" onClick={() => { setFileName(''); setCode(''); }}>✕</button>
+            <div className="file-chip-row">
+              <div className="file-chip">
+                📎 {fileName}
+                <button type="button" className="ghost" onClick={() => { setFileName(''); setCode(''); }}>✕</button>
+              </div>
             </div>
           )}
 
