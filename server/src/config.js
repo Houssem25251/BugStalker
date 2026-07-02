@@ -15,4 +15,6 @@ export const config = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   // bcrypt work factor. 12 is a sane 2025 default for an interactive login.
   bcryptRounds: 12,
+  // Base URL of the Python agent service (Node calls it internally).
+  agentUrl: process.env.AGENT_URL || 'http://localhost:8000',
 };

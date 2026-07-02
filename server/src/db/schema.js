@@ -23,6 +23,7 @@ export const jobs = pgTable('jobs', {
     .references(() => users.id, { onDelete: 'cascade' }),
   inputType: inputTypeEnum('input_type').notNull(),
   inputRef: text('input_ref').notNull(),
+  language: text('language'),                        // e.g. "python" | "javascript" (for the agent)
   status: jobStatusEnum('status').notNull().default('queued'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
