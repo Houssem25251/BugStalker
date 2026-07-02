@@ -637,6 +637,52 @@ code {
 .chat-input-box button.stop { background: var(--fail); }
 .chat-input-box button.stop:hover:not(:disabled) { background: #ef4444; }
 
+/* code / repo mode toggle */
+.mode-toggle {
+  display: inline-flex;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 3px;
+}
+.mode-toggle button {
+  background: none;
+  color: var(--text-dim);
+  padding: 5px 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: 6px;
+}
+.mode-toggle button:hover:not(:disabled) { background: var(--panel-2); }
+.mode-toggle button.on { background: var(--accent-soft); color: var(--text); }
+
+.attach { padding: 7px 12px; font-size: 0.85rem; }
+
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  background: var(--accent-soft);
+  border: 1px solid #3a2f57;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+.file-chip .ghost { text-decoration: none; }
+
+.repo-input { flex: 1; font-family: var(--mono); }
+
+.repo-file {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+.repo-file summary { cursor: pointer; user-select: none; }
+.repo-file summary code { color: var(--accent); }
+
 /* ---------- auth modal ---------- */
 .modal-backdrop {
   position: fixed;

@@ -5,6 +5,7 @@ import { db } from '../db/index.js';
 import { jobs, results } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
 import { analyzeCode } from '../agentClient.js';
+import { fetchRepoFiles, parseRepoUrl } from '../github.js';
 
 const router = Router();
 
@@ -17,48 +18,79 @@ const createJobSchema = z.object({
   language: z.string().optional().default(''),
 });
 
+async function setStatus(jobId, status) {
+  await db.update(jobs).set({ status, updatedAt: new Date() }).where(eq(jobs.id, jobId));
+}
+
+// Analyze one snippet (paste or uploaded file content).
+async function processSnippet(job) {
+  const analysis = await analyzeCode({ code: job.inputRef, language: job.language || '' });
+  await db.insert(results).values({
+    jobId: job.id,
+    bugs: analysis.bugs ?? null,
+    fixedCode: analysis.fixed_code ?? null,
+    verificationStatus: analysis.verification_status ?? null,
+    explanation: analysis.explanation ?? null,
+    raw: analysis,
+  });
+}
+
+// Analyze a public GitHub repo: fetch up to a few files, run each through the agent.
+async function processRepo(job) {
+  const { branch, totalCandidates, files } = await fetchRepoFiles(job.inputRef);
+  if (files.length === 0) {
+    throw new Error('No analyzable Python/JavaScript files found in this repository.');
+  }
+
+  const fileResults = [];
+  for (const f of files) {
+    // maxAttempts 1 per file to stay inside free-tier limits.
+    const analysis = await analyzeCode({ code: f.content, language: f.language, maxAttempts: 1 });
+    fileResults.push({ path: f.path, language: f.language, analysis });
+  }
+
+  const bugs = fileResults.flatMap((r) =>
+    (r.analysis.bugs || []).map((b) => ({ ...b, file: r.path })),
+  );
+  const buggy = fileResults.filter((r) => (r.analysis.bugs || []).length > 0);
+  const allVerified = buggy.every((r) => r.analysis.verification_status === 'passed');
+
+  await db.insert(results).values({
+    jobId: job.id,
+    bugs,
+    verificationStatus: buggy.length === 0 ? 'passed' : allVerified ? 'passed' : 'failed',
+    explanation:
+      `Analyzed ${fileResults.length} of ${totalCandidates} candidate files on branch "${branch}". ` +
+      `Found ${bugs.length} bug(s) across ${buggy.length} file(s).`,
+    raw: { branch, totalCandidates, files: fileResults },
+  });
+}
+
 // Runs in the background after a job is created (fire-and-forget).
-// Flips status queued -> running -> done/failed and stores the result.
 async function processJob(job) {
   try {
-    await db.update(jobs).set({ status: 'running', updatedAt: new Date() }).where(eq(jobs.id, job.id));
+    await setStatus(job.id, 'running');
 
-    if (job.inputType !== 'paste') {
-      // file/repo ingestion isn't wired yet (that's Step 6).
-      await db.insert(results).values({
-        jobId: job.id,
-        verificationStatus: 'failed',
-        explanation: `Input type "${job.inputType}" is not supported yet.`,
-      });
-      await db.update(jobs).set({ status: 'failed', updatedAt: new Date() }).where(eq(jobs.id, job.id));
-      return;
+    if (job.inputType === 'repo') {
+      await processRepo(job);
+    } else {
+      // 'paste' and 'file' are both code-as-text.
+      await processSnippet(job);
     }
 
-    // Call the Python agent. inputRef holds the pasted code.
-    const analysis = await analyzeCode({ code: job.inputRef, language: job.language || '' });
-
-    await db.insert(results).values({
-      jobId: job.id,
-      bugs: analysis.bugs ?? null,
-      fixedCode: analysis.fixed_code ?? null,
-      verificationStatus: analysis.verification_status ?? null,
-      explanation: analysis.explanation ?? null,
-      raw: analysis,
-    });
-
-    await db.update(jobs).set({ status: 'done', updatedAt: new Date() }).where(eq(jobs.id, job.id));
+    await setStatus(job.id, 'done');
   } catch (err) {
     console.error(`[job ${job.id}] processing failed:`, err.message);
     try {
       await db.insert(results).values({
         jobId: job.id,
         verificationStatus: 'failed',
-        explanation: `Agent error: ${err.message}`,
+        explanation: `Error: ${err.message}`,
       });
     } catch {
       /* ignore secondary failure */
     }
-    await db.update(jobs).set({ status: 'failed', updatedAt: new Date() }).where(eq(jobs.id, job.id));
+    await setStatus(job.id, 'failed');
   }
 }
 
@@ -70,6 +102,11 @@ router.post('/', async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid input', details: parsed.error.flatten().fieldErrors });
     }
     const { inputType, inputRef, language } = parsed.data;
+
+    // Reject bad repo URLs up front instead of failing in the background.
+    if (inputType === 'repo' && !parseRepoUrl(inputRef)) {
+      return res.status(400).json({ error: 'Not a valid GitHub repository URL (expected https://github.com/owner/repo)' });
+    }
 
     const [job] = await db
       .insert(jobs)

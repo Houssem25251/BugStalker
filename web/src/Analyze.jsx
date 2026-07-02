@@ -12,6 +12,8 @@ const LANGS = [
   { value: 'javascript', label: 'JavaScript' },
 ];
 
+const EXT_LANG = { py: 'python', js: 'javascript' };
+
 // Custom dropdown (native <select> can't be styled). Opens upward since it
 // sits at the bottom of the screen.
 function LanguageSelect({ value, onChange }) {
@@ -54,8 +56,11 @@ function LanguageSelect({ value, onChange }) {
 }
 
 export default function Analyze({ onLogout }) {
+  const [mode, setMode] = useState('code'); // 'code' | 'repo'
   const [language, setLanguage] = useState('python');
   const [code, setCode] = useState('');
+  const [fileName, setFileName] = useState(''); // set when code came from an uploaded file
+  const [repoUrl, setRepoUrl] = useState('');
   const [messages, setMessages] = useState([]);
   const [history, setHistory] = useState([]);
   const [activeJobId, setActiveJobId] = useState(null);
@@ -64,6 +69,7 @@ export default function Analyze({ onLogout }) {
   const pollRef = useRef(null);
   const logEndRef = useRef(null);
   const currentRef = useRef(null); // assistant message id of the running analysis
+  const fileInputRef = useRef(null);
 
   useEffect(() => () => clearInterval(pollRef.current), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -101,24 +107,37 @@ export default function Analyze({ onLogout }) {
 
   async function send(e) {
     e.preventDefault();
-    if (!code.trim() || busy) return;
-    setBusy(true);
+    if (busy) return;
 
+    let payload;
+    let userMsg;
+    if (mode === 'repo') {
+      const url = repoUrl.trim();
+      if (!url) return;
+      payload = { inputType: 'repo', inputRef: url, language: '' };
+      userMsg = { role: 'user', url };
+    } else {
+      if (!code.trim()) return;
+      payload = { inputType: fileName ? 'file' : 'paste', inputRef: code, language };
+      userMsg = { role: 'user', code, language, fileName };
+    }
+
+    setBusy(true);
     const userId = ++idRef.current;
     const assistantId = ++idRef.current;
-    const submittedCode = code;
-    const submittedLang = language;
 
     setMessages((ms) => [
       ...ms,
-      { id: userId, role: 'user', code: submittedCode, language: submittedLang },
-      { id: assistantId, role: 'assistant', status: 'queued', result: null },
+      { id: userId, ...userMsg },
+      { id: assistantId, role: 'assistant', status: 'queued', result: null, isRepo: mode === 'repo' },
     ]);
     setCode('');
+    setFileName('');
+    setRepoUrl('');
     currentRef.current = assistantId;
 
     try {
-      const { job } = await createJob({ inputType: 'paste', inputRef: submittedCode, language: submittedLang });
+      const { job } = await createJob(payload);
       setActiveJobId(job.id);
       updateMsg(assistantId, { status: job.status });
       poll(job.id, assistantId);
@@ -129,6 +148,30 @@ export default function Analyze({ onLogout }) {
     }
   }
 
+  function onFilePicked(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    if (file.size > 60_000) {
+      alert('File too large (max 60 KB for now).');
+      return;
+    }
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const lang = EXT_LANG[ext];
+    if (!lang) {
+      alert('Only .py and .js files are supported for now.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCode(String(reader.result || ''));
+      setLanguage(lang);
+      setFileName(file.name);
+      setMode('code');
+    };
+    reader.readAsText(file);
+  }
+
   async function openJob(jobId) {
     if (busy) return;
     clearInterval(pollRef.current);
@@ -137,8 +180,12 @@ export default function Analyze({ onLogout }) {
       const { job, result } = await getJob(jobId);
       const uid = ++idRef.current;
       const aid = ++idRef.current;
+      const userMsg =
+        job.inputType === 'repo'
+          ? { role: 'user', url: job.inputRef }
+          : { role: 'user', code: job.inputRef, language: job.language || '' };
       setMessages([
-        { id: uid, role: 'user', code: job.inputRef, language: job.language || '' },
+        { id: uid, ...userMsg },
         { id: aid, role: 'assistant', status: job.status, result: result || null },
       ]);
     } catch { /* ignore */ }
@@ -178,8 +225,12 @@ export default function Analyze({ onLogout }) {
               onClick={() => openJob(job.id)}
               title={job.inputRef}
             >
-              <span className="history-title">{firstLine(job.inputRef)}</span>
-              <span className="history-meta">{job.language || '?'} · {job.status}</span>
+              <span className="history-title">
+                {job.inputType === 'repo' ? '📦 ' : ''}{firstLine(job.inputRef)}
+              </span>
+              <span className="history-meta">
+                {job.inputType === 'repo' ? 'repo' : job.language || '?'} · {job.status}
+              </span>
             </button>
           ))}
         </div>
@@ -192,7 +243,7 @@ export default function Analyze({ onLogout }) {
           {messages.length === 0 && (
             <div className="chat-empty">
               <Logo size={72} />
-              <p>Paste some code below and I'll hunt for bugs — then prove the fix by running it. 🐛</p>
+              <p>Paste code, upload a file, or point me at a GitHub repo — I'll hunt for bugs and prove the fix by running it. 🐛</p>
             </div>
           )}
 
@@ -205,22 +256,54 @@ export default function Analyze({ onLogout }) {
 
         <form className="chat-input" onSubmit={send}>
           <div className="chat-input-row">
-            <LanguageSelect value={language} onChange={setLanguage} />
-            <span className="muted" style={{ fontSize: '0.78rem' }}>Ctrl + Enter to send</span>
+            <div className="mode-toggle">
+              <button type="button" className={mode === 'code' ? 'on' : ''} onClick={() => setMode('code')}>Code</button>
+              <button type="button" className={mode === 'repo' ? 'on' : ''} onClick={() => setMode('repo')}>GitHub repo</button>
+            </div>
+            {mode === 'code' && <LanguageSelect value={language} onChange={setLanguage} />}
+            {mode === 'code' && (
+              <>
+                <button type="button" className="secondary attach" onClick={() => fileInputRef.current?.click()}>
+                  📎 File
+                </button>
+                <input ref={fileInputRef} type="file" accept=".py,.js" onChange={onFilePicked} hidden />
+              </>
+            )}
+            <span className="muted" style={{ fontSize: '0.78rem', marginLeft: 'auto' }}>
+              {mode === 'code' ? 'Ctrl + Enter to send' : 'public repos only · up to 4 files'}
+            </span>
           </div>
+
+          {fileName && (
+            <div className="file-chip">
+              📎 {fileName}
+              <button type="button" className="ghost" onClick={() => { setFileName(''); setCode(''); }}>✕</button>
+            </div>
+          )}
+
           <div className="chat-input-box">
-            <textarea
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Paste your code here…"
-              rows={4}
-              spellCheck={false}
-            />
+            {mode === 'repo' ? (
+              <input
+                className="repo-input"
+                type="url"
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                placeholder="https://github.com/owner/repo"
+              />
+            ) : (
+              <textarea
+                value={code}
+                onChange={(e) => { setCode(e.target.value); if (fileName) setFileName(''); }}
+                onKeyDown={onKeyDown}
+                placeholder="Paste your code here…"
+                rows={4}
+                spellCheck={false}
+              />
+            )}
             {busy ? (
               <button type="button" className="stop" onClick={cancel}>Stop</button>
             ) : (
-              <button type="submit" disabled={!code.trim()}>Send</button>
+              <button type="submit" disabled={mode === 'repo' ? !repoUrl.trim() : !code.trim()}>Send</button>
             )}
           </div>
         </form>
@@ -231,10 +314,20 @@ export default function Analyze({ onLogout }) {
 }
 
 function UserMsg({ m }) {
+  if (m.url) {
+    return (
+      <div className="msg user">
+        <div className="bubble">
+          <div className="msg-lang">github repo</div>
+          <p style={{ margin: '6px 0 0' }}>📦 {m.url}</p>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="msg user">
       <div className="bubble">
-        <div className="msg-lang">{m.language}</div>
+        <div className="msg-lang">{m.fileName ? `📎 ${m.fileName}` : m.language}</div>
         <pre>{m.code}</pre>
       </div>
     </div>
@@ -246,20 +339,23 @@ function AgentMsg({ m }) {
     <div className="msg assistant">
       <div className="avatar"><Logo size={46} /></div>
       <div className="bubble">
-        {m.result ? <Result result={m.result} /> : <Thinking status={m.status} error={m.error} />}
+        {m.result ? <Result result={m.result} /> : <Thinking status={m.status} isRepo={m.isRepo} error={m.error} />}
       </div>
     </div>
   );
 }
 
-function Thinking({ status, error }) {
+function Thinking({ status, isRepo, error }) {
   if (status === 'failed') {
     return <p className="error" style={{ margin: 0 }}>❌ {error || 'Something went wrong.'}</p>;
   }
   if (status === 'canceled') {
     return <p className="muted" style={{ margin: 0 }}>Canceled.</p>;
   }
-  const label = status === 'running' ? 'Analyzing your code…' : 'Queued…';
+  const label =
+    status === 'running'
+      ? isRepo ? 'Fetching the repo and analyzing files… (can take a few minutes)' : 'Analyzing your code…'
+      : 'Queued…';
   return (
     <p className="thinking">
       <span className="dots"><span /><span /><span /></span> {label}
@@ -276,7 +372,45 @@ function runSummary(r) {
   return parts.join('\n');
 }
 
+// Adapt the agent's snake_case per-file analysis to the shape <Result> expects.
+function adaptAnalysis(a = {}) {
+  return {
+    bugs: a.bugs || [],
+    fixedCode: a.fixed_code || '',
+    verificationStatus: a.verification_status ?? null,
+    explanation: a.explanation || '',
+    raw: { verification: a.verification, test_code: a.test_code },
+  };
+}
+
+function RepoResult({ result }) {
+  const files = result.raw?.files || [];
+  const passed = result.verificationStatus === 'passed';
+  return (
+    <div>
+      <div className={`badge ${passed ? 'pass' : 'fail'}`} style={{ marginBottom: 6 }}>
+        {passed ? '✅ Repo scan complete' : '⚠️ Repo scan complete — some fixes unverified'}
+      </div>
+      {result.explanation && <p className="muted" style={{ marginTop: 0 }}>{result.explanation}</p>}
+      {files.map((f) => (
+        <details key={f.path} className="repo-file" open={(f.analysis?.bugs || []).length > 0}>
+          <summary>
+            <code>{f.path}</code>
+            <span className="muted"> — {(f.analysis?.bugs || []).length} bug(s)</span>
+          </summary>
+          <div style={{ marginTop: 10 }}>
+            <Result result={adaptAnalysis(f.analysis)} />
+          </div>
+        </details>
+      ))}
+    </div>
+  );
+}
+
 function Result({ result }) {
+  // Repo results carry a per-file breakdown.
+  if (result.raw?.files) return <RepoResult result={result} />;
+
   const passed = result.verificationStatus === 'passed';
   const bugs = result.bugs || [];
   const raw = result.raw || {};
@@ -299,6 +433,7 @@ function Result({ result }) {
           {bugs.map((b, i) => (
             <li key={i}>
               <span className="severity">{b.severity || '?'}</span> {b.description}
+              {b.file && <code className="muted"> [{b.file}]</code>}
               {b.line != null && <span className="muted"> (line {b.line})</span>}
             </li>
           ))}
