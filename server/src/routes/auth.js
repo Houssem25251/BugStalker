@@ -10,9 +10,13 @@ import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
-const credentialsSchema = z.object({
+const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8, 'Password must be at least 8 characters'),
+});
+
+const signupSchema = loginSchema.extend({
+  phone: z.string().min(6, 'Phone number looks too short'),
 });
 
 function signToken(user) {
@@ -25,19 +29,19 @@ function signToken(user) {
 
 // Strip the hash before anything leaves the server.
 function publicUser(user) {
-  return { id: user.id, email: user.email, createdAt: user.createdAt };
+  return { id: user.id, email: user.email, phone: user.phone, createdAt: user.createdAt };
 }
 
 // POST /auth/signup
 router.post('/signup', async (req, res, next) => {
   try {
-    const parsed = credentialsSchema.safeParse(req.body);
+    const parsed = signupSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid input', details: parsed.error.flatten().fieldErrors });
     }
 
     const email = parsed.data.email.toLowerCase().trim();
-    const { password } = parsed.data;
+    const { password, phone } = parsed.data;
 
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
     if (existing.length > 0) {
@@ -47,8 +51,8 @@ router.post('/signup', async (req, res, next) => {
     const passwordHash = await bcrypt.hash(password, config.bcryptRounds);
     const [user] = await db
       .insert(users)
-      .values({ email, passwordHash })
-      .returning({ id: users.id, email: users.email, createdAt: users.createdAt });
+      .values({ email, phone: phone.trim(), passwordHash })
+      .returning({ id: users.id, email: users.email, phone: users.phone, createdAt: users.createdAt });
 
     return res.status(201).json({ user: publicUser(user), token: signToken(user) });
   } catch (err) {
@@ -59,7 +63,7 @@ router.post('/signup', async (req, res, next) => {
 // POST /auth/login
 router.post('/login', async (req, res, next) => {
   try {
-    const parsed = credentialsSchema.safeParse(req.body);
+    const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {
       // Don't leak which field was wrong on a login attempt.
       return res.status(400).json({ error: 'Invalid input' });
@@ -89,7 +93,7 @@ router.post('/login', async (req, res, next) => {
 router.get('/me', requireAuth, async (req, res, next) => {
   try {
     const [user] = await db
-      .select({ id: users.id, email: users.email, createdAt: users.createdAt })
+      .select({ id: users.id, email: users.email, phone: users.phone, createdAt: users.createdAt })
       .from(users)
       .where(eq(users.id, req.user.id));
 

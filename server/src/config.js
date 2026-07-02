@@ -17,4 +17,6 @@ export const config = {
   bcryptRounds: 12,
   // Base URL of the Python agent service (Node calls it internally).
   agentUrl: process.env.AGENT_URL || 'http://localhost:8000',
+  // Where the React frontend runs (allowed CORS origin).
+  frontendOrigin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173',
 };

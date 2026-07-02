@@ -4,6 +4,7 @@ import { pgTable, serial, text, integer, timestamp, pgEnum, jsonb } from 'drizzl
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   email: text('email').notNull().unique(),
+  phone: text('phone'),
   passwordHash: text('password_hash').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
