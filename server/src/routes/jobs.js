@@ -159,4 +159,27 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
+// DELETE /jobs/:id — delete one of the current user's jobs (its result rows
+// cascade-delete via the FK).
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'Invalid job id' });
+    }
+
+    const deleted = await db
+      .delete(jobs)
+      .where(and(eq(jobs.id, id), eq(jobs.userId, req.user.id)))
+      .returning({ id: jobs.id });
+
+    if (deleted.length === 0) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+    return res.json({ deleted: id });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

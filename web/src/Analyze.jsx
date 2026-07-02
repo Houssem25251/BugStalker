@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { createJob, getJob, getJobs } from './api';
+import { createJob, getJob, getJobs, deleteJob } from './api';
 import Logo from './Logo';
 import ThemeToggle from './ThemeToggle';
 
@@ -202,6 +202,18 @@ export default function Analyze({ onLogout }) {
     setSidebarOpen(false);
   }
 
+  async function removeJob(jobId, e) {
+    e.stopPropagation(); // don't open the chat we're deleting
+    if (!window.confirm('Delete this analysis? This cannot be undone.')) return;
+    try {
+      await deleteJob(jobId);
+      setHistory((h) => h.filter((j) => j.id !== jobId));
+      if (activeJobId === jobId) newChat();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
   // Stop watching the running analysis. (The backend job still finishes and
   // will appear as done in history — we just stop showing it live.)
   function cancel() {
@@ -233,19 +245,28 @@ export default function Analyze({ onLogout }) {
         <div className="history">
           {history.length === 0 && <p className="muted history-empty">No history yet</p>}
           {history.map((job) => (
-            <button
-              key={job.id}
-              className={`history-item ${job.id === activeJobId ? 'active' : ''}`}
-              onClick={() => openJob(job.id)}
-              title={job.inputRef}
-            >
-              <span className="history-title">
-                {job.inputType === 'repo' ? '📦 ' : ''}{firstLine(job.inputRef)}
-              </span>
-              <span className="history-meta">
-                {job.inputType === 'repo' ? 'repo' : job.language || '?'} · {job.status}
-              </span>
-            </button>
+            <div key={job.id} className="history-row">
+              <button
+                className={`history-item ${job.id === activeJobId ? 'active' : ''}`}
+                onClick={() => openJob(job.id)}
+                title={job.inputRef}
+              >
+                <span className="history-title">
+                  {job.inputType === 'repo' ? '📦 ' : ''}{firstLine(job.inputRef)}
+                </span>
+                <span className="history-meta">
+                  {job.inputType === 'repo' ? 'repo' : job.language || '?'} · {job.status}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="history-del"
+                title="Delete this analysis"
+                onClick={(e) => removeJob(job.id, e)}
+              >
+                🗑
+              </button>
+            </div>
           ))}
         </div>
         <ThemeToggle block />

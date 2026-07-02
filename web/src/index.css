@@ -506,6 +506,26 @@ code {
 }
 .history-meta { font-size: 0.7rem; color: var(--text-dim); font-family: var(--mono); }
 
+.history-row { position: relative; }
+.history-row .history-item { width: 100%; padding-right: 34px; }
+.history-del {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.history-row:hover .history-del,
+.history-del:focus { opacity: 1; }
+.history-del:hover:not(:disabled) { background: rgba(248, 113, 113, 0.18); }
+
 /* bigger, top-aligned agent avatar */
 .chat .msg { align-items: flex-start; }
 .chat .avatar { width: 50px; height: 50px; }
@@ -791,6 +811,7 @@ body, .sidebar, .bubble, .modal, .lang-trigger, input, textarea {
 
   .main { width: 100%; }
   .chat-log { padding-top: 60px; } /* clear the hamburger */
+  .history-del { opacity: 1; } /* no hover on touch screens */
 }
 
 /* --- phones --- */

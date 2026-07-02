@@ -29,3 +29,4 @@ export const login = (email, password) => api('/auth/login', { method: 'POST', b
 export const createJob = (payload) => api('/jobs', { method: 'POST', body: payload, auth: true });
 export const getJobs = () => api('/jobs', { auth: true });
 export const getJob = (id) => api(`/jobs/${id}`, { auth: true });
+export const deleteJob = (id) => api(`/jobs/${id}`, { method: 'DELETE', auth: true });
