@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createJob, getJob, getJobs } from './api';
 import Logo from './Logo';
+import ThemeToggle from './ThemeToggle';
 
 function firstLine(s = '') {
   const line = (s.split('\n').find((l) => l.trim()) || s).trim();
@@ -247,6 +248,7 @@ export default function Analyze({ onLogout }) {
             </button>
           ))}
         </div>
+        <ThemeToggle block />
         <button className="secondary logout" onClick={onLogout}>Log out</button>
       </aside>
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { login, signup, setToken } from './api';
 import Logo from './Logo';
+import ThemeToggle from './ThemeToggle';
 
 // Login / signup: a big square modal — logo centered on the left half,
 // form centered on the right half.
@@ -45,6 +46,7 @@ export default function AuthForm({ onAuthed }) {
 
   return (
     <div className="modal-backdrop">
+      <div className="auth-theme"><ThemeToggle /></div>
       <div className="modal">
         <div className="modal-left">
           <span className="modal-logo-glow">
