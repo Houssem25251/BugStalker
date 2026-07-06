@@ -1,22 +1,27 @@
-"""The agent's LangGraph — the detect -> fix -> verify -> retry loop.
+"""The agent's LangGraph — the detect+fix -> verify -> retry loop.
 
-  [x] detect  — find bugs in the code
-  [x] fix     — propose a corrected version (uses previous failure as feedback)
-  [x] verify  — generate a test, then run it against BOTH the original and the
-                fixed code. Trust the fix only if the test FAILS on the buggy
-                code and PASSES on the fix (= the test actually catches the bug).
-  [x] retry   — if verify fails, loop back to fix (capped by max_attempts)
+Speed-optimized version:
+  [x] detect_fix — ONE LLM call finds the bugs AND proposes the fix
+                   (Groq gpt-oss-120b, a reasoning model on fast hardware)
+  [x] verify     — generate a test (Groq llama-3.3, fast), then run it against
+                   BOTH the original and the fixed code IN PARALLEL. Trust the
+                   fix only if the test FAILS on the buggy code and PASSES on
+                   the fix (= the test actually catches the bug).
+  [x] retry      — if verify fails and attempts remain, loop back to fix with
+                   the failure fed back in (default max_attempts is 1: no retry)
 
 Graph:
-  START -> detect -> (bugs? fix : END)
-  fix -> verify
+  START -> detect_fix -> (bugs? verify : END)
   verify -> (passed OR out of attempts ? END : fix)
+  fix -> verify
 """
 import json
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from app import config
 from app.llm import chat_with_fallback
 from app.sandbox import run_code
 
@@ -34,12 +39,18 @@ class AgentState(TypedDict, total=False):
     max_attempts: int          # cap on fix attempts
 
 
-DETECT_PROMPT = """You are a meticulous bug-detection assistant. Analyze the following {language} code and identify bugs, logic errors, and likely mistakes.
+# One call does detection AND fixing — saves a full LLM round trip.
+DETECT_FIX_PROMPT = """You are an expert software engineer and bug hunter. Analyze the following {language} code.
 
-Return ONLY a JSON array (no prose, no markdown fences). Each element must be an object:
-{{"line": <line number or null>, "severity": "low" | "medium" | "high", "description": "<concise explanation>"}}
+1. Identify all bugs, logic errors, and likely mistakes.
+2. Rewrite the code so ALL of those bugs are fixed. Preserve the original intent, the public interface (function/class names and signatures), and the style; change only what's needed.
 
-If you find no bugs, return exactly: []
+Return ONLY a JSON object (no prose, no markdown fences):
+{{"bugs": [{{"line": <line number or null>, "severity": "low" | "medium" | "high", "description": "<concise explanation>"}}],
+  "fixed_code": "<the complete corrected code>",
+  "explanation": "<brief summary of what you changed and why>"}}
+
+If you find no bugs, return exactly: {{"bugs": [], "fixed_code": "", "explanation": ""}}
 
 Code:
 {code}
@@ -69,16 +80,6 @@ Code (for reference — do NOT include it in your answer):
 """
 
 
-def _parse_json_array(text: str) -> list:
-    try:
-        start = text.index("[")
-        end = text.rindex("]") + 1
-        data = json.loads(text[start:end])
-        return data if isinstance(data, list) else []
-    except (ValueError, json.JSONDecodeError):
-        return []
-
-
 def _parse_json_object(text: str) -> dict:
     try:
         start = text.index("{")
@@ -93,28 +94,33 @@ def _passed(run: dict) -> bool:
     return bool(run.get("ran")) and not run.get("timed_out") and run.get("exit_code") == 0
 
 
-def detect_node(state: AgentState) -> AgentState:
-    prompt = DETECT_PROMPT.format(
+def detect_fix_node(state: AgentState) -> AgentState:
+    """First pass: find the bugs and fix them in a single reasoning-model call."""
+    prompt = DETECT_FIX_PROMPT.format(
         language=state.get("language") or "unknown-language",
         code=state["code"],
     )
-    raw = chat_with_fallback(prompt, prefer="groq")   # Groq: fast detection
-    return {"bugs": _parse_json_array(raw)}
+    obj = _parse_json_object(chat_with_fallback(prompt, groq_model=config.GROQ_REASONING_MODEL))
+    bugs = obj.get("bugs", [])
+    return {
+        "bugs": bugs if isinstance(bugs, list) else [],
+        "fixed_code": obj.get("fixed_code", ""),
+        "explanation": obj.get("explanation", ""),
+        "attempts": 1,
+    }
 
 
-def _build_fix_prompt(state: AgentState) -> str:
+def _build_retry_fix_prompt(state: AgentState) -> str:
+    """Fix-only prompt used on retries, with the previous failure fed back in."""
     language = state.get("language") or "unknown-language"
     bugs = json.dumps(state.get("bugs", []), indent=2)
-    prompt = f"""You are an expert software engineer. The following {language} code has these known bugs (JSON):
+    ver = state.get("verification", {}) or {}
+    fixed_run = ver.get("fixed_run", {}) or {}
+    return f"""You are an expert software engineer. The following {language} code has these known bugs (JSON):
 {bugs}
 
 Rewrite the code so ALL of these bugs are fixed. Preserve the original intent, the public interface (function/class names and signatures), and the style; change only what's needed.
-"""
-    # On a retry, feed back exactly why the last attempt failed verification.
-    if state.get("verification_status") == "failed":
-        ver = state.get("verification", {}) or {}
-        fixed_run = ver.get("fixed_run", {}) or {}
-        prompt += f"""
+
 Your PREVIOUS fix attempt FAILED automated verification. That attempt was:
 {state.get("fixed_code", "")}
 
@@ -125,20 +131,20 @@ Running the test against it produced:
 - note: {ver.get('note', '')}
 
 Diagnose why it failed and produce a corrected version that will pass.
-"""
-    prompt += f"""
+
 Return ONLY a JSON object (no prose, no markdown fences):
 {{"fixed_code": "<the complete corrected code>", "explanation": "<brief summary of what you changed and why>"}}
 
 Original code:
 {state['code']}
 """
-    return prompt
 
 
 def fix_node(state: AgentState) -> AgentState:
-    raw = chat_with_fallback(_build_fix_prompt(state), prefer="gemini")  # Gemini: fixes
-    obj = _parse_json_object(raw)
+    """Retry-only node: re-fix with the verification failure as feedback."""
+    obj = _parse_json_object(
+        chat_with_fallback(_build_retry_fix_prompt(state), groq_model=config.GROQ_REASONING_MODEL)
+    )
     return {
         "fixed_code": obj.get("fixed_code", ""),
         "explanation": obj.get("explanation", ""),
@@ -156,7 +162,8 @@ def verify_node(state: AgentState) -> AgentState:
         bugs=json.dumps(state.get("bugs", []), indent=2),
         code=original_code,
     )
-    test_code = _parse_json_object(chat_with_fallback(prompt, prefer="gemini")).get("test_code", "")
+    # Test generation is mechanical — use the fast default Groq model.
+    test_code = _parse_json_object(chat_with_fallback(prompt)).get("test_code", "")
 
     if not test_code.strip() or not fixed_code.strip():
         return {
@@ -165,9 +172,12 @@ def verify_node(state: AgentState) -> AgentState:
             "verification_status": "failed",
         }
 
-    # Same test, run against both versions (code is prepended so the test can call it).
-    original_run = run_code(original_code + "\n\n" + test_code, language)
-    fixed_run = run_code(fixed_code + "\n\n" + test_code, language)
+    # Same test, run against both versions — in PARALLEL (they're independent).
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        original_future = pool.submit(run_code, original_code + "\n\n" + test_code, language)
+        fixed_future = pool.submit(run_code, fixed_code + "\n\n" + test_code, language)
+        original_run = original_future.result()
+        fixed_run = fixed_future.result()
 
     fixed_ok = _passed(fixed_run)
     original_ok = _passed(original_run)
@@ -194,34 +204,34 @@ def verify_node(state: AgentState) -> AgentState:
     }
 
 
-def route_after_detect(state: AgentState) -> str:
-    return "fix" if state.get("bugs") else END
+def route_after_detect_fix(state: AgentState) -> str:
+    return "verify" if state.get("bugs") else END
 
 
 def route_after_verify(state: AgentState) -> str:
     if state.get("verification_status") == "passed":
         return END
-    if state.get("attempts", 0) >= state.get("max_attempts", 2):
+    if state.get("attempts", 0) >= state.get("max_attempts", 1):
         return END   # give up after the cap — return the best attempt, marked failed
     return "fix"     # retry with the failure fed back in
 
 
 def build_graph():
     g = StateGraph(AgentState)
-    g.add_node("detect", detect_node)
+    g.add_node("detect_fix", detect_fix_node)
     g.add_node("fix", fix_node)
     g.add_node("verify", verify_node)
-    g.add_edge(START, "detect")
-    g.add_conditional_edges("detect", route_after_detect, {"fix": "fix", END: END})
-    g.add_edge("fix", "verify")
+    g.add_edge(START, "detect_fix")
+    g.add_conditional_edges("detect_fix", route_after_detect_fix, {"verify": "verify", END: END})
     g.add_conditional_edges("verify", route_after_verify, {"fix": "fix", END: END})
+    g.add_edge("fix", "verify")
     return g.compile()
 
 
 agent_graph = build_graph()
 
 
-def run_analysis(code: str, language: str = "", max_attempts: int = 2) -> dict:
+def run_analysis(code: str, language: str = "", max_attempts: int = 1) -> dict:
     result = agent_graph.invoke({
         "code": code,
         "language": language,

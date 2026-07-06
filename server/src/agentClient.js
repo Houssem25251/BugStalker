@@ -20,7 +20,7 @@ export function pingAgent() {
 }
 
 // POST /analyze — runs the detect->fix->verify->retry loop and returns the result.
-export function analyzeCode({ code, language = '', maxAttempts = 2 }) {
+export function analyzeCode({ code, language = '', maxAttempts = 1 }) {
   return agentFetch('/analyze', {
     method: 'POST',
     body: JSON.stringify({ code, language, max_attempts: maxAttempts }),

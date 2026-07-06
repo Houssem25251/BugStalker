@@ -13,6 +13,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # --- Default model names (overridable via env) ---
 # NOTE: provider model names change often — we'll confirm these at call time in 3.3.
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+# Reasoning model on Groq — used for the detect+fix step (smarter, still fast).
+GROQ_REASONING_MODEL = os.getenv("GROQ_REASONING_MODEL", "openai/gpt-oss-120b")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 

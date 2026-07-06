@@ -726,6 +726,35 @@ code {
 .repo-file summary { cursor: pointer; user-select: none; }
 .repo-file summary code { color: var(--accent); }
 
+/* ---------- clean minimal intro ---------- */
+.intro-clean {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #141419; /* flat dark — no glow, theme-independent */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  cursor: pointer;
+  transition: opacity 0.4s ease;
+}
+.intro-clean.out { opacity: 0; }
+.intro-clean .logo-img { filter: invert(1); } /* ghost stays white here */
+.intro-clean > * { animation: intro-fade 0.8s ease both; }
+.intro-clean h1 {
+  color: #fff;
+  font-size: clamp(2.2rem, 8vw, 3.4rem);
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  animation-delay: 0.15s;
+}
+@keyframes intro-fade {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
 /* ---------- theming ---------- */
 /* the ghost: white on dark theme (inverted), black on light theme */
 .logo-img { filter: invert(1); }

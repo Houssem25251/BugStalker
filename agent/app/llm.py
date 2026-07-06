@@ -1,11 +1,11 @@
 """LLM providers for the agent.
 
-- Groq  -> fast detection/scanning pass
-- Gemini -> deeper reasoning / fix generation
+Strategy: Groq FIRST for everything (fast inference on LPUs), Gemini as the
+automatic fallback if Groq errors or hits a rate limit.
 
-Both are wrapped as LangChain chat models so the agent loop (3.4) can use a
-uniform .invoke() interface. Includes a simple fallback: if the preferred
-provider errors (e.g. 429 rate limit), fall back to the other one.
+- detect+fix  -> openai/gpt-oss-120b on Groq (reasoning model, still fast)
+- test gen    -> llama-3.3-70b on Groq (mechanical task, fastest thing we have)
+- fallback    -> gemini-2.5-flash
 """
 from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -13,10 +13,10 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from app import config
 
 
-def get_groq_llm(temperature: float = 0):
+def get_groq_llm(temperature: float = 0, model: str | None = None):
     return ChatGroq(
         api_key=config.GROQ_API_KEY,
-        model=config.GROQ_MODEL,
+        model=model or config.GROQ_MODEL,
         temperature=temperature,
     )
 
@@ -42,22 +42,21 @@ def test_providers(prompt: str = "Reply with exactly one word: pong"):
     """Independently ping each provider — powers the /llm-test endpoint."""
     return {
         "groq": _try_provider(get_groq_llm, prompt),
+        "groq_reasoning": _try_provider(
+            lambda: get_groq_llm(model=config.GROQ_REASONING_MODEL), prompt
+        ),
         "gemini": _try_provider(get_gemini_llm, prompt),
     }
 
 
-def chat_with_fallback(prompt: str, prefer: str = "groq") -> str:
-    """Send a prompt, trying the preferred provider first, then the other.
+def chat_with_fallback(prompt: str, groq_model: str | None = None) -> str:
+    """Send a prompt: Groq first (optionally a specific Groq model), Gemini second.
 
-    This is the reusable helper the detect->fix->verify loop will call in 3.4+.
+    Gemini only runs when Groq fails (rate limit, outage, bad response) — this
+    keeps the fast path fast while staying resilient.
     """
-    order = (
-        [get_groq_llm, get_gemini_llm]
-        if prefer == "groq"
-        else [get_gemini_llm, get_groq_llm]
-    )
     last_error = None
-    for factory in order:
+    for factory in (lambda: get_groq_llm(model=groq_model), get_gemini_llm):
         try:
             return factory().invoke(prompt).content
         except Exception as e:

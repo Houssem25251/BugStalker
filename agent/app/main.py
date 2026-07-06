@@ -32,7 +32,7 @@ def llm_test():
 class AnalyzeRequest(BaseModel):
     code: str
     language: str = ""
-    max_attempts: int = 2
+    max_attempts: int = 1
 
 
 @app.post("/analyze")

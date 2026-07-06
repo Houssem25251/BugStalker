@@ -104,7 +104,7 @@ export default function Analyze({ onLogout }) {
         updateMsg(assistantId, { status: 'failed', error: err.message });
         setBusy(false);
       }
-    }, 2500);
+    }, 1000);
   }
 
   async function send(e) {
